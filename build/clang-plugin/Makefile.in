@@ -5,7 +5,9 @@
 CXX      := @CXX@
 CXXFLAGS := @CXXFLAGS@
 LDFLAGS  := @LDFLAGS@
+CXXLIBFLAGS := @CXXLIBFLAGS@
 VPATH		 := @srcdir@
+PLUGIN := @plugin@
 
 # Helper for end
 NULL :=
@@ -23,8 +25,6 @@ TESTSRCS := \
 OBJS := $(patsubst %.cpp,%.o,$(CPPSRCS))
 TESTS := $(patsubst %.cpp,test-%,$(TESTSRCS))
 
-PLUGIN := libclang-plugin.so
-
 all: $(PLUGIN) $(TESTS)
 
 $(OBJS): %.o: %.cpp Makefile
@@ -32,7 +32,7 @@ $(OBJS): %.o: %.cpp Makefile
 
 $(PLUGIN): $(OBJS)
 	rm -f $@
-	$(CXX) -shared -o $@ $(CXXFLAGS) $(LDFLAGS) $(OBJS) -lclangASTMatchers
+	$(CXX) $(CXXLIBFLAGS) -o $@ $(CXXFLAGS) $(OBJS) $(LDFLAGS)
 
 TESTFLAGS := -fsyntax-only -Xclang -verify \
 	-Xclang -load -Xclang $(CURDIR)/$(PLUGIN) \

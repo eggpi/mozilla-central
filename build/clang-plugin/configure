@@ -1,7 +1,16 @@
 #!/bin/sh
 
+PLATFORM=`uname`
+
 # Default srcdir to this directory
 srcdir=
+
+plugin=libclang-plugin
+if [ $PLATFORM == Darwin ]; then
+  plugin="$plugin.dylib"
+else
+  plugin="$plugin.so"
+fi
 
 for option; do
   case "$option" in
@@ -35,14 +44,28 @@ fi
 
 echo "$LLVMCONFIG"
 
+LLVMLIBS="core mc analysis asmparser mcparser bitreader"
 LLVMCXXFLAGS=`$LLVMCONFIG --cxxflags`
 LLVMLDFLAGS=`$LLVMCONFIG --ldflags`
+LLVMLDFLAGS="$LLVMLDFLAGS `$LLVMCONFIG --libs $LLVMLIBS`"
+CLANGLDFLAGS="-lclangFrontend -lclangDriver -lclangSerialization \
+  -lclangParse -lclangSema -lclangAnalysis -lclangEdit -lclangAST \
+  -lclangLex -lclangBasic -lclangASTMatchers"
+
 CXXFLAGS="$CXXFLAGS $LLVMCXXFLAGS -fno-rtti -fno-exceptions"
-LDFLAGS="$LDFLAGS $LLVMLDFLAGS"
+LDFLAGS="$LDFLAGS $LLVMLDFLAGS $CLANGLDFLAGS"
+
+if [ $PLATFORM == Darwin ]; then
+  CXXLIBFLAGS="-dynamiclib -shared"
+else
+  CXXLIBFLAGS="-shared"
+fi
 
 cat $srcdir/Makefile.in | sed \
   -e "s%@CXX@%$CXX%" \
   -e "s%@CXXFLAGS@%$CXXFLAGS%" \
   -e "s%@LDFLAGS@%$LDFLAGS%" \
+  -e "s%@CXXLIBFLAGS@%$CXXLIBFLAGS%" \
   -e "s%@srcdir@%$srcdir%" \
+  -e "s%@plugin@%$plugin%" \
   > Makefile
