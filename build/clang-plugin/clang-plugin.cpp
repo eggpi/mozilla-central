@@ -105,7 +105,7 @@ public:
           !overridden && M != d->method_end(); ++M) {
         // The way that Clang checks if a method M overrides its parent method
         // is if the method has the same name but would not overload.
-        if (M->getName() == (*it)->getName() &&
+        if (M->getDeclName() == (*it)->getDeclName() &&
             !CI.getSema().IsOverload(*M, (*it), false))
           overridden = true;
       }
