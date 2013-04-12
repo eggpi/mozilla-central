@@ -1,4 +1,15 @@
 . "$topsrcdir/build/mozconfig.common"
 
-CC="/tools/gcc-4.7.2-0moz1/bin/gcc"
-CXX="/tools/gcc-4.7.2-0moz1/bin/g++"
+if [ -d "$topsrcdir/clang" ]; then
+    # mozilla-central based build
+    export CC=$topsrcdir/clang/bin/clang
+    export CXX=$topsrcdir/clang/bin/clang++
+    export LLVMCONFIG=$topsrcdir/clang/bin/llvm-config
+elif [ -d "$topsrcdir/../clang" ]; then
+    # comm-central based build
+    export CC=$topsrcdir/../clang/bin/clang
+    export CXX=$topsrcdir/../clang/bin/clang++
+    export LLVMCONFIG=$topsrcdir/../clang/bin/llvm-config
+fi
+
+ac_add_options --enable-clang-plugin
