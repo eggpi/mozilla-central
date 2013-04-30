@@ -12,11 +12,13 @@
 #include "clang/Frontend/MultiplexConsumer.h"
 #include "clang/Sema/Sema.h"
 #include "llvm/ADT/DenseMap.h"
+#include <iostream>
 
 #define CLANG_VERSION_FULL (CLANG_VERSION_MAJOR * 100 + CLANG_VERSION_MINOR)
 
 using namespace llvm;
 using namespace clang;
+using namespace std;
 
 namespace {
 
@@ -59,6 +61,7 @@ public:
   }
 
   virtual void HandleTranslationUnit(ASTContext &ctx) {
+    cout << "In HandleTranslationUnit, top-level decl is " << ctx.getTranslationUnitDecl() << endl;
     TraverseDecl(ctx.getTranslationUnitDecl());
   }
 
@@ -344,6 +347,7 @@ public:
     MozChecker *checker = new MozChecker(CI);
 
     ASTConsumer *consumers[] = { checker, checker->getOtherConsumer() };
+    cout << "Creating MultiplexConsumer" << endl;
     return new MultiplexConsumer(consumers);
   }
 
