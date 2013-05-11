@@ -5,7 +5,7 @@
 "use strict";
 
 function debug(s) {
-  // dump("-*- PushService.jsm: " + s + "\n");
+  dump("-*- PushService.jsm: " + s + "\n");
 }
 
 const Cc = Components.classes;
@@ -590,8 +590,8 @@ this.PushService = {
                    .createInstance(Ci.nsIWebSocketChannel);
     }
     else if (uri.scheme === "ws") {
-      debug("Push over an insecure connection (ws://) is not allowed!");
-      return;
+      this._ws = Cc["@mozilla.org/network/protocol;1?name=ws"]
+                   .createInstance(Ci.nsIWebSocketChannel);
     }
     else {
       debug("Unsupported websocket scheme " + uri.scheme);

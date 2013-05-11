@@ -1273,3 +1273,7 @@ pref("media.webaudio.enabled", true);
 // If this turns true, Moz*Gesture events are not called stopPropagation()
 // before content.
 pref("dom.debug.propagate_gesture_events_through_content", false);
+
+pref("services.push.enabled", true);
+// serverURL to be assigned by services team
+pref("services.push.serverURL", "ws://localhost:8082");

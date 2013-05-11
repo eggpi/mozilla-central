@@ -399,7 +399,7 @@ pref("dom.mozAlarms.enabled", true);
 // SimplePush
 pref("services.push.enabled", true);
 // serverURL to be assigned by services team
-pref("services.push.serverURL", "");
+pref("services.push.serverURL", "ws://localhost:8082");
 pref("services.push.userAgentID", "");
 // Exponential back-off start is 5 seconds like in HTTP/1.1.
 // Maximum back-off is pingInterval.
