@@ -5,7 +5,7 @@
 "use strict";
 
 function debug(s) {
-  // dump("-*- Push.js: " + s + "\n");
+  dump("-*- Push.js: " + s + "\n");
 }
 
 const Cc = Components.classes;
