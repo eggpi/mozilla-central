@@ -649,16 +649,21 @@ class DebugProgram(MachCommandBase):
         help='Do not pass the -no-remote argument by default')
     @CommandArgument('+background', '+b', action='store_true',
         help='Do not pass the -foreground argument by default on Mac')
-    def debug(self, params, remote, background):
+    @CommandArgument('+debugger', '+d', action='store', default='gdb',
+        help='The debugger to use')
+    def debug(self, params, remote, background, debugger):
         import which
         try:
-            debugger = which.which('gdb')
+            debugger = which.which(debugger)
         except Exception as e:
-            print("You don't have gdb in your PATH")
+            print("You don't have '%s' in your PATH" % debugger)
             print(e)
             return 1
         try:
-            args = [debugger, '--args', self.get_binary_path('app')]
+            if debugger.endswith('gdb'):
+              args = [debugger, '--args', self.get_binary_path('app')]
+            else:
+              args = [debugger, '--', self.get_binary_path('app')]
         except Exception as e:
             print("It looks like your program isn't built.",
                 "You can run |mach build| to build it.")
