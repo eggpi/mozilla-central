@@ -968,10 +968,6 @@ Navigator::GetDeviceStorages(const nsAString& aType,
 Geolocation*
 Navigator::GetGeolocation(ErrorResult& aRv)
 {
-  if (!Preferences::GetBool("geo.enabled", true)) {
-    return nullptr;
-  }
-
   if (mGeolocation) {
     return mGeolocation;
   }
