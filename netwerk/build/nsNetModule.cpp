@@ -36,6 +36,7 @@
 #include "nsXULAppAPI.h"
 #include "nsCategoryCache.h"
 #include "nsIContentSniffer.h"
+#include "Seer.h"
 #include "nsNetUtil.h"
 #include "mozilla/net/NeckoChild.h"
 
@@ -812,6 +813,7 @@ NS_DEFINE_NAMED_CID(NS_NETWORK_LINK_SERVICE_CID);
 #endif
 NS_DEFINE_NAMED_CID(NS_SERIALIZATION_HELPER_CID);
 NS_DEFINE_NAMED_CID(NS_REDIRECTCHANNELREGISTRAR_CID);
+NS_DEFINE_NAMED_CID(NS_NETWORKSEER_CID);
 
 static const mozilla::Module::CIDEntry kNeckoCIDs[] = {
     { &kNS_IOSERVICE_CID, false, NULL, nsIOServiceConstructor },
@@ -953,6 +955,7 @@ static const mozilla::Module::CIDEntry kNeckoCIDs[] = {
 #endif
     { &kNS_SERIALIZATION_HELPER_CID, false, NULL, nsSerializationHelperConstructor },
     { &kNS_REDIRECTCHANNELREGISTRAR_CID, false, NULL, RedirectChannelRegistrarConstructor },
+    { &kNS_NETWORKSEER_CID, false, NULL, mozilla::net::Seer::Create },
     { NULL }
 };
 
@@ -1097,6 +1100,7 @@ static const mozilla::Module::ContractIDEntry kNeckoContracts[] = {
 #endif
     { NS_SERIALIZATION_HELPER_CONTRACTID, &kNS_SERIALIZATION_HELPER_CID },
     { NS_REDIRECTCHANNELREGISTRAR_CONTRACTID, &kNS_REDIRECTCHANNELREGISTRAR_CID },
+    { NS_NETWORKSEER_CONTRACTID, &kNS_NETWORKSEER_CID },
     { NULL }
 };
 

@@ -1309,6 +1309,9 @@ pref("network.dir.format", 2);
 // enables the prefetch service (i.e., prefetching of <link rel="next"> URLs).
 pref("network.prefetch-next", true);
 
+// enables the predictive service
+pref("network.seer.enabled", true);
+
 
 // The following prefs pertain to the negotiate-auth extension (see bug 17578),
 // which provides transparent Kerberos or NTLM authentication using the SPNEGO
