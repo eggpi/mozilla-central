@@ -18,6 +18,7 @@
 #include "nsIDocShell.h"
 #include "nsILoadContext.h"
 #include "nsCPrefetchService.h"
+#include "nsINetworkSeer.h"
 #include "nsIURI.h"
 #include "nsNetUtil.h"
 #include "nsIHttpChannel.h"
@@ -825,19 +826,31 @@ nsContentSink::PrefetchHref(const nsAString &aHref,
   } while (parentItem);
   
   // OK, we passed the security check...
-  
+
+  // construct URI using document charset
+  const nsACString &charset = mDocument->GetDocumentCharacterSet();
+  nsCOMPtr<nsIURI> uri;
+  NS_NewURI(getter_AddRefs(uri), aHref,
+            charset.IsEmpty() ? nullptr : PromiseFlatCString(charset).get(),
+            mDocument->GetDocBaseURI());
+
+  if (!uri) {
+    return;
+  }
+
+  // tell the network seer about this link
+  nsCOMPtr<nsINetworkSeer> seerService = do_GetService("@mozilla.org/network/seer;1");
+  if (seerService) {
+    nsCOMPtr<nsILoadContext> loadContext(do_QueryInterface(docshell));
+    seerService->Learn(uri, mDocumentURI,
+                       nsINetworkSeer::LEARN_LOAD_SUBRESOURCE, loadContext);
+  }
+
+  // do the actual prefetching
   nsCOMPtr<nsIPrefetchService> prefetchService(do_GetService(NS_PREFETCHSERVICE_CONTRACTID));
   if (prefetchService) {
-    // construct URI using document charset
-    const nsACString &charset = mDocument->GetDocumentCharacterSet();
-    nsCOMPtr<nsIURI> uri;
-    NS_NewURI(getter_AddRefs(uri), aHref,
-              charset.IsEmpty() ? nullptr : PromiseFlatCString(charset).get(),
-              mDocument->GetDocBaseURI());
-    if (uri) {
-      nsCOMPtr<nsIDOMNode> domNode = do_QueryInterface(aSource);
-      prefetchService->PrefetchURI(uri, mDocumentURI, domNode, aExplicit);
-    }
+    nsCOMPtr<nsIDOMNode> domNode = do_QueryInterface(aSource);
+    prefetchService->PrefetchURI(uri, mDocumentURI, domNode, aExplicit);
   }
 }
 
