@@ -113,6 +113,19 @@ function mock_doc(aIdentity, aOrigin, aDoFunc) {
   return mockedDoc;
 }
 
+function mock_fxa_rp(aIdentity, aOrigin, aDoFunc) {
+  let mockedDoc = {};
+  mockedDoc.id = uuid();
+  mockedDoc.emailHint = aIdentity;
+  mockedDoc.origin = aOrigin;
+  mockedDoc.wantIssuer = "firefox-accounts";
+
+  mockedDoc.doReady = partial(aDoFunc, "ready");
+  mockedDoc.doLogin = partial(aDoFunc, "login");
+
+  return mockedDoc;
+}
+
 // mimicking callback funtionality for ease of testing
 // this observer auto-removes itself after the observe function
 // is called, so this is meant to observe only ONE event.
@@ -211,3 +224,6 @@ function setup_provisioning(identity, afterSetupCallback, doneProvisioningCallba
 
 // Switch debug messages on by default
 Services.prefs.setBoolPref("toolkit.identity.debug", true);
+
+// Enable Firefox Accounts
+Services.prefs.setBoolPref("identity.fxaccounts.enabled", true);

@@ -164,6 +164,52 @@ function test_unwatchBeforeWatch() {
   run_next_test();
 }
 
+/*
+ * FirefoxAccounts flows
+ */
+
+function test_fxa_watch() {
+  do_test_pending();
+  
+  let mockedRP = mock_fxa_rp(null, TEST_URL, function(method) {
+    do_check_eq(method, "ready");
+    do_test_finished();
+    run_next_test();
+  });
+
+  MinimalIDService.RP.watch(mockedRP);
+}
+
+function test_fxa_request() {
+  do_test_pending();
+
+  let mockedRP = mock_fxa_rp(null, TEST_URL, function(method) {
+    do_check_eq(method, "ready");
+    // After watch() is complete, the fxa service calls our onready
+    // callback.  Now we can call request();
+    MinimalIDService.RP.request(mockedRP.id);
+  });
+
+  // Mock the Firefox Accounts Manager
+  function MockFXA() {
+    this.watch = function() {
+      mockedRP.doReady(mockedRP.id);
+    },
+
+    this.request = function() {
+      do_test_finished();
+      run_next_test();
+    }
+  }
+
+  // Replace the firefox accounts delegate in the Identity Service.
+  // This will obviously have side-effects for any subsequent tests.
+  MinimalIDService._delegates["firefox-accounts"] = new MockFXA();
+
+  // First, call watch()
+  MinimalIDService.RP.watch(mockedRP);
+}
+
 let TESTS = [
   test_overall,
   test_mock_doc,
@@ -174,7 +220,10 @@ let TESTS = [
   test_logout,
   test_logoutBeforeWatch,
   test_requestBeforeWatch,
-  test_unwatchBeforeWatch
+  test_unwatchBeforeWatch,
+
+  test_fxa_watch,
+  test_fxa_request
 ];
 
 TESTS.forEach(add_test);

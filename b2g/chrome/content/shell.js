@@ -22,9 +22,9 @@ Cu.import('resource://gre/modules/ErrorPage.jsm');
 Cu.import('resource://gre/modules/NetworkStatsService.jsm');
 #endif
 
-// identity
+// Identity
 Cu.import('resource://gre/modules/SignInToWebsite.jsm');
-SignInToWebsiteController.init();
+Cu.import('resource://gre/modules/FxAccountsMgmtService.jsm');
 
 Cu.import('resource://gre/modules/DownloadsAPI.jsm');
 
@@ -684,6 +684,8 @@ var CustomEventManager = {
     window.addEventListener("ContentStart", (function(evt) {
       let content = shell.contentBrowser.contentWindow;
       content.addEventListener("mozContentEvent", this, false, true);
+      content.addEventListener("mozFxAccountsContentEvent", FxAccountsMgmtService,
+                               false, true);
 
       // After content starts to load for 10 seconds, send and
       // clean up the buffered open-app requests if there is any.

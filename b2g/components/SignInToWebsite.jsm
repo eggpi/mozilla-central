@@ -462,3 +462,5 @@ this.SignInToWebsiteController = {
   }
 
 };
+
+SignInToWebsiteController.init();

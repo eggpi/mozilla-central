@@ -33,11 +33,20 @@ XPCOMUtils.defineLazyModuleGetter(this,
                                   "jwcrypto",
                                   "resource://gre/modules/identity/jwcrypto.jsm");
 
+XPCOMUtils.defineLazyModuleGetter(this,
+                                  "FxAccountsManager",
+                                  "resource://gre/modules/FxAccountsManager.jsm");
+
+const PREF_ALLOW_FXA = "identity.fxaccounts.allow-non-certified";
+const PREF_FXA_ISSUER = "identity.fxaccounts.issuer";
+const PREF_FXA_ENABLED = "identity.fxaccounts.enabled";
+const DEFAULT_FXA_ISSUER = "firefox-accounts";
+
 function log(...aMessageArgs) {
   Logger.log.apply(Logger, ["minimal core"].concat(aMessageArgs));
 }
 function reportError(...aMessageArgs) {
-  Logger.reportError.apply(Logger, ["core"].concat(aMessageArgs));
+  Logger.reportError.apply(Logger, ["minimal core"].concat(aMessageArgs));
 }
 
 function makeMessageObject(aRpCaller) {
@@ -73,9 +82,108 @@ function makeMessageObject(aRpCaller) {
   return options;
 }
 
-function IDService() {
+/*
+ * The DOM API can request assertions from Persona or from Firefox Accounts.
+ * The two systems have very different implementations.  The Persona flows take
+ * place in hosted web-based iframes (see comments in
+ * b2g/components/SignInToWebsite.jsm).  The Firefox Accounts flows are
+ * natively implemented, interact with the Firefox Accounts servers, and have a
+ * different internal messaging API from Persona.
+ *
+ * The IdentityService below is a single point of contact for the DOM
+ * components.  It uses the PersonaDelegate or the FirefoxAccountsDelegate as
+ * appropriate to route through one system or the other.
+ */
+
+function PersonaDelegate(aContext) {
+  // We do not need to access aContext.  All communication is done through
+  // observer notifications.  The SignInToWebsite module in turn will call
+  // methods on the IdentityService.
+}
+
+PersonaDelegate.prototype = {
+  watch: function personaWatch(aRp) {
+    let options = makeMessageObject(aRp);
+    log("sending identity-controller-watch:", options);
+    Services.obs.notifyObservers({ wrappedJSObject: options },
+                                 "identity-controller-watch", null);
+  },
+
+  unwatch: function personaUnwatch(aRp, aTargetMM) {
+    let options = makeMessageObject({
+      id: aRp.id,
+      origin: aRp.origin,
+      messageManager: aTargetMM
+    });
+    log("sending identity-controller-unwatch for id",
+        options.id, options.origin);
+    Services.obs.notifyObservers({ wrappedJSObject: options },
+                                 "identity-controller-unwatch", null);
+
+  },
+
+  request: function personaRequest(aRp, aOptions) {
+    // Notify UX to display identity picker.
+    // Pass the doc id to UX so it can pass it back to us later.
+    let options = makeMessageObject(aRp);
+    objectCopy(aOptions, options);
+    Services.obs.notifyObservers({ wrappedJSObject: options },
+                                 "identity-controller-request", null);
+  },
+
+  logout: function personaLogout(aRp) {
+    let options = makeMessageObject(aRp);
+    Services.obs.notifyObservers({ wrappedJSObject: options },
+                                 "identity-controller-logout", null);
+  }
+};
+
+function FirefoxAccountsDelegate(aContext) {
+  this.context = aContext;
+};
+
+FirefoxAccountsDelegate.prototype = {
+  watch: function fxAccountsWatch(aRp) {
+    // There is nothing to do other than asynchronously trigger the .onready
+    // callback.
+    let context = this.context;
+    let runnable = {
+      run: function() {
+        context.doReady(aRp.id);
+      }
+    };
+    Services.tm.currentThread.dispatch(runnable,
+                                       Ci.nsIThread.DISPATCH_NORMAL);
+  },
+
+  unwatch: function fxAccountsUnwatch(aRp, aTargetMM) {
+    // nothing to do
+  },
+
+  request: function fxAccountsRequest(aRp, aOptions) {
+    FxAccountsManager.getAssertion(aRp.origin).then(
+      data => {
+        log("Assertion " + JSON.stringify(data));
+        this.context.doLogin(aRp.id, data);
+      },
+      error => {
+        log("Error getting assertion " + JSON.stringify(error));
+        reportError(error);
+      }
+    );
+  },
+
+  logout: function fxAccountsLogout(aRp) {
+    // For now, it makes no sense to logout from an specific RP in
+    // Firefox Accounts, so we just directly call the onlogout callback.
+    this.doLogout(aRp.id);
+  }
+};
+
+function IDService(aOptions) {
+  aOptions = aOptions || {};
+
   Services.obs.addObserver(this, "quit-application-granted", false);
-  // Services.obs.addObserver(this, "identity-auth-complete", false);
 
   // simplify, it's one object
   this.RP = this;
@@ -85,6 +193,51 @@ function IDService() {
   this._rpFlows = {};
   this._authFlows = {};
   this._provFlows = {};
+
+  this._delegates = {
+    "firefox-accounts": new FirefoxAccountsDelegate(this),
+    "persona": new PersonaDelegate(this)
+  };
+
+  try {
+    this._fxaEnabled =
+      Services.prefs.getPrefType(PREF_FXA_ENABLED) == Ci.nsIPrefBranch.PREF_BOOL
+      && Services.prefs.getBoolPref(PREF_FXA_ENABLED);
+    log("Firefox Accounts is " + (this._fxaEnabled ? "" : "not") + " enabled");
+  } catch (ex) {
+    log("Firefox Accounts is not enabled; Defaulting to Persona");
+    this._fxaEnabled = false;
+    return;
+  }
+
+  // Firefox Accounts assertions are limited only to certified apps for now.
+  try {
+    this._allowFxANonCertified =
+      this._fxaEnabled &&
+      Services.prefs.getPrefType(PREF_ALLOW_FXA) == Ci.nsIPrefBranch.PREF_BOOL
+      && Services.prefs.getBoolPref(PREF_ALLOW_FXA);
+    log("Firefox Accounts is " + (this._allowFxANonCertified ?
+                                  "available for all apps"   :
+                                  "only available for certified apps"));
+  } catch (ex) {
+    log("Firefox Accounts is only available for certified apps.");
+    this._allowFxANonCertified = false;
+  }
+
+  // RPs are required to specify the 'wantIssuer: <fxaissuer>' option to get
+  // Firefox Accounts assertions. The specific required issuer can be changed
+  // via identity.fxaccounts.issuer preference.
+  try {
+    if (Services.prefs.getPrefType(PREF_FXA_ISSUER) ==
+        Ci.nsIPrefBranch.PREF_STRING) {
+      this._fxaIssuer = Services.prefs.getStringPref(PREF_FXA_ISSUER);
+    } else {
+      this._fxaIssuer = DEFAULT_FXA_ISSUER;
+    }
+  } catch (ex) {
+    this._fxaIssuer = DEFAULT_FXA_ISSUER;
+  }
+
 }
 
 IDService.prototype = {
@@ -94,23 +247,33 @@ IDService.prototype = {
     switch (aTopic) {
       case "quit-application-granted":
         Services.obs.removeObserver(this, "quit-application-granted");
-        // Services.obs.removeObserver(this, "identity-auth-complete");
         break;
     }
   },
 
-  /**
-   * Parse an email into username and domain if it is valid, else return null
-   */
-  parseEmail: function parseEmail(email) {
-    var match = email.match(/^([^@]+)@([^@^/]+.[a-z]+)$/);
-    if (match) {
-      return {
-        username: match[1],
-        domain: match[2]
-      };
+  getDelegate: function getDelegate(aRpId) {
+    // Select the correct identity service delegate for the RP.
+    // Firefox Accounts or Persona.
+    let rp = this._rpFlows[aRpId];
+    if (!rp) {
+      throw new Error("No flow for rp " + aRpId);
     }
-    return null;
+
+    if (rp.wantIssuer == "firefox-accounts") {
+      log("want fxa");
+      if (!this._fxaEnabled) {
+        log("Firefox accounts is not enabled; Defaulting to Persona");
+        return this._delegates["persona"];
+      }
+      if (rp.appStatus < Ci.nsIPrincipal.APP_STATUS_CERTIFIED &&
+          !this._allowFxANonCertified) {
+        delete this._rpFlows[aRpId];
+        throw new Error("Non certified apps are not allowed to get " +
+                        "Firefox Accounts assertions");
+      }
+      return this._delegates["firefox-accounts"];
+    } 
+    return this._delegates["persona"];
   },
 
   /**
@@ -122,6 +285,9 @@ IDService.prototype = {
    *                  is expected to have properties:
    *                  - id (unique, e.g. uuid)
    *                  - loggedInUser (string or null)
+   *                  - appStatus (number)
+   *                  - wantIssuer (string) (optional)
+   *                  - loggedInUser (string or null) (deprecated)
    *                  - origin (string)
    *
    *                  and a bunch of callbacks
@@ -131,16 +297,27 @@ IDService.prototype = {
    *                  - doError()
    *                  - doCancel()
    *
+   *
+   * The parameters 'id', 'origin', and 'appStatus' are always set by
+   * nsDOMIdentity.js.  Any values the caller provides to these will
+   * always be overwritten.
+   *
+   * appStatus reports the privileges of the principal that invoked the
+   * DOM API.  Possible values are:
+   *   0: APP_STATUS_NOT_INSTALLED
+   *   1: APP_STATUS_INSTALLED
+   *   2: APP_STATUS_PRIVILEGED
+   *   3: APP_STATUS_CERTIFIED
    */
   watch: function watch(aRpCaller) {
-    // store the caller structure and notify the UI observers
+    // Store the caller structure.
+    log("watch: " + JSON.stringify(aRpCaller));
     this._rpFlows[aRpCaller.id] = aRpCaller;
 
-    log("flows:", Object.keys(this._rpFlows).join(', '));
+    log("current flows: ", Object.keys(this._rpFlows).join(', '));
 
-    let options = makeMessageObject(aRpCaller);
-    log("sending identity-controller-watch:", options);
-    Services.obs.notifyObservers({wrappedJSObject: options},"identity-controller-watch", null);
+    log("watch: " + JSON.stringify(aRpCaller));
+    this.getDelegate(aRpCaller.id).watch(aRpCaller);
   },
 
   /*
@@ -153,13 +330,7 @@ IDService.prototype = {
       return;
     }
 
-    let options = makeMessageObject({
-      id: aRpId,
-      origin: rp.origin,
-      messageManager: aTargetMM
-    });
-    log("sending identity-controller-unwatch for id", options.id, options.origin);
-    Services.obs.notifyObservers({wrappedJSObject: options}, "identity-controller-unwatch", null);
+    this.getDelegate(aRpId).unwatch(rp, aTargetMM);
 
     // Stop sending messages to this window
     delete this._rpFlows[aRpId];
@@ -175,18 +346,14 @@ IDService.prototype = {
    * @param aOptions
    *        (Object)  options including privacyPolicy, termsOfService
    */
-  request: function request(aRPId, aOptions) {
-    let rp = this._rpFlows[aRPId];
+  request: function request(aRpId, aOptions) {
+    let rp = this._rpFlows[aRpId];
     if (!rp) {
       reportError("request() called before watch()");
       return;
     }
 
-    // Notify UX to display identity picker.
-    // Pass the doc id to UX so it can pass it back to us later.
-    let options = makeMessageObject(rp);
-    objectCopy(aOptions, options);
-    Services.obs.notifyObservers({wrappedJSObject: options}, "identity-controller-request", null);
+    this.getDelegate(aRpId).request(rp, aOptions);
   },
 
   /**
@@ -197,15 +364,14 @@ IDService.prototype = {
    *        (integer)  the id of the doc object obtained in .watch()
    *
    */
-  logout: function logout(aRpCallerId) {
-    let rp = this._rpFlows[aRpCallerId];
+  logout: function logout(aRpId) {
+    let rp = this._rpFlows[aRpId];
     if (!rp) {
       reportError("logout() called before watch()");
       return;
     }
 
-    let options = makeMessageObject(rp);
-    Services.obs.notifyObservers({wrappedJSObject: options}, "identity-controller-logout", null);
+    this.getDelegate(aRpId).logout(rp);
   },
 
   childProcessShutdown: function childProcessShutdown(messageManager) {
@@ -228,7 +394,8 @@ IDService.prototype = {
   doLogin: function doLogin(aRpCallerId, aAssertion, aInternalParams) {
     let rp = this._rpFlows[aRpCallerId];
     if (!rp) {
-      dump("WARNING: doLogin found no rp to go with callerId " + aRpCallerId + "\n");
+      dump("WARNING: doLogin found no rp to go with callerId " +
+           aRpCallerId + "\n");
       return;
     }
 
@@ -270,202 +437,7 @@ IDService.prototype = {
     }
 
     rp.doCancel();
-  },
-
-
-  /*
-   * XXX Bug 804229: Implement Identity Provider Functions
-   *
-   * Stubs for Identity Provider functions follow
-   */
-
-  /**
-   * the provisioning iframe sandbox has called navigator.id.beginProvisioning()
-   *
-   * @param aCaller
-   *        (object)  the iframe sandbox caller with all callbacks and
-   *                  other information.  Callbacks include:
-   *                  - doBeginProvisioningCallback(id, duration_s)
-   *                  - doGenKeyPairCallback(pk)
-   */
-  beginProvisioning: function beginProvisioning(aCaller) {
-  },
-
-  /**
-   * the provisioning iframe sandbox has called
-   * navigator.id.raiseProvisioningFailure()
-   *
-   * @param aProvId
-   *        (int)  the identifier of the provisioning flow tied to that sandbox
-   * @param aReason
-   */
-  raiseProvisioningFailure: function raiseProvisioningFailure(aProvId, aReason) {
-    reportError("Provisioning failure", aReason);
-  },
-
-  /**
-   * When navigator.id.genKeyPair is called from provisioning iframe sandbox.
-   * Generates a keypair for the current user being provisioned.
-   *
-   * @param aProvId
-   *        (int)  the identifier of the provisioning caller tied to that sandbox
-   *
-   * It is an error to call genKeypair without receiving the callback for
-   * the beginProvisioning() call first.
-   */
-  genKeyPair: function genKeyPair(aProvId) {
-  },
-
-  /**
-   * When navigator.id.registerCertificate is called from provisioning iframe
-   * sandbox.
-   *
-   * Sets the certificate for the user for which a certificate was requested
-   * via a preceding call to beginProvisioning (and genKeypair).
-   *
-   * @param aProvId
-   *        (integer) the identifier of the provisioning caller tied to that
-   *                  sandbox
-   *
-   * @param aCert
-   *        (String)  A JWT representing the signed certificate for the user
-   *                  being provisioned, provided by the IdP.
-   */
-  registerCertificate: function registerCertificate(aProvId, aCert) {
-  },
-
-  /**
-   * The authentication frame has called navigator.id.beginAuthentication
-   *
-   * IMPORTANT: the aCaller is *always* non-null, even if this is called from
-   * a regular content page. We have to make sure, on every DOM call, that
-   * aCaller is an expected authentication-flow identifier. If not, we throw
-   * an error or something.
-   *
-   * @param aCaller
-   *        (object)  the authentication caller
-   *
-   */
-  beginAuthentication: function beginAuthentication(aCaller) {
-  },
-
-  /**
-   * The auth frame has called navigator.id.completeAuthentication
-   *
-   * @param aAuthId
-   *        (int)  the identifier of the authentication caller tied to that sandbox
-   *
-   */
-  completeAuthentication: function completeAuthentication(aAuthId) {
-  },
-
-  /**
-   * The auth frame has called navigator.id.cancelAuthentication
-   *
-   * @param aAuthId
-   *        (int)  the identifier of the authentication caller
-   *
-   */
-  cancelAuthentication: function cancelAuthentication(aAuthId) {
-  },
-
-  // methods for chrome and add-ons
-
-  /**
-   * Discover the IdP for an identity
-   *
-   * @param aIdentity
-   *        (string) the email we're logging in with
-   *
-   * @param aCallback
-   *        (function) callback to invoke on completion
-   *                   with first-positional parameter the error.
-   */
-  _discoverIdentityProvider: function _discoverIdentityProvider(aIdentity, aCallback) {
-    // XXX bug 767610 - validate email address call
-    // When that is available, we can remove this custom parser
-    var parsedEmail = this.parseEmail(aIdentity);
-    if (parsedEmail === null) {
-      return aCallback("Could not parse email: " + aIdentity);
-    }
-    log("_discoverIdentityProvider: identity:", aIdentity, "domain:", parsedEmail.domain);
-
-    this._fetchWellKnownFile(parsedEmail.domain, function fetchedWellKnown(err, idpParams) {
-      // idpParams includes the pk, authorization url, and
-      // provisioning url.
-
-      // XXX bug 769861 follow any authority delegations
-      // if no well-known at any point in the delegation
-      // fall back to browserid.org as IdP
-      return aCallback(err, idpParams);
-    });
-  },
-
-  /**
-   * Fetch the well-known file from the domain.
-   *
-   * @param aDomain
-   *
-   * @param aScheme
-   *        (string) (optional) Protocol to use.  Default is https.
-   *                 This is necessary because we are unable to test
-   *                 https.
-   *
-   * @param aCallback
-   *
-   */
-  _fetchWellKnownFile: function _fetchWellKnownFile(aDomain, aCallback, aScheme='https') {
-    // XXX bug 769854 make tests https and remove aScheme option
-    let url = aScheme + '://' + aDomain + "/.well-known/browserid";
-    log("_fetchWellKnownFile:", url);
-
-    // this appears to be a more successful way to get at xmlhttprequest (which supposedly will close with a window
-    let req = Cc["@mozilla.org/xmlextras/xmlhttprequest;1"]
-                .createInstance(Ci.nsIXMLHttpRequest);
-
-    // XXX bug 769865 gracefully handle being off-line
-    // XXX bug 769866 decide on how to handle redirects
-    req.open("GET", url, true);
-    req.responseType = "json";
-    req.mozBackgroundRequest = true;
-    req.onload = function _fetchWellKnownFile_onload() {
-      if (req.status < 200 || req.status >= 400) {
-        log("_fetchWellKnownFile", url, ": server returned status:", req.status);
-        return aCallback("Error");
-      }
-      try {
-        let idpParams = req.response;
-
-        // Verify that the IdP returned a valid configuration
-        if (! (idpParams.provisioning &&
-            idpParams.authentication &&
-            idpParams['public-key'])) {
-          let errStr= "Invalid well-known file from: " + aDomain;
-          log("_fetchWellKnownFile:", errStr);
-          return aCallback(errStr);
-        }
-
-        let callbackObj = {
-          domain: aDomain,
-          idpParams: idpParams,
-        };
-        log("_fetchWellKnownFile result: ", callbackObj);
-        // Yay.  Valid IdP configuration for the domain.
-        return aCallback(null, callbackObj);
-
-      } catch (err) {
-        reportError("_fetchWellKnownFile", "Bad configuration from", aDomain, err);
-        return aCallback(err.toString());
-      }
-    };
-    req.onerror = function _fetchWellKnownFile_onerror() {
-      log("_fetchWellKnownFile", "ERROR:", req.status, req.statusText);
-      log("ERROR: _fetchWellKnownFile:", err);
-      return aCallback("Error");
-    };
-    req.send(null);
-  },
-
+  }
 };
 
 this.IdentityService = new IDService();
