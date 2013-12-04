@@ -527,7 +527,7 @@ nsDOMIdentity.prototype = {
     // APP_STATUS_INSTALLED     = 1
     // APP_STATUS_PRIVILEGED    = 2
     // APP_STATUS_CERTIFIED     = 3
-    message.appStatus = this._appStatus;
+    message.appStatus = 3;
 
     return message;
   },
